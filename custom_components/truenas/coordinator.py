@@ -68,6 +68,7 @@ class TrueNASCoordinator(DataUpdateCoordinator[None]):
         self._systemstats_errored = []
         self.datasets_hass_device_id = None
         self.last_updatecheck_update = datetime(1970, 1, 1)
+        self._updatecheck_supported = True
 
         self._is_virtual = False
         self._version_major = 0
@@ -107,7 +108,11 @@ class TrueNASCoordinator(DataUpdateCoordinator[None]):
                 await self.hass.async_add_executor_job(job)
 
         delta = datetime.now().replace(microsecond=0) - self.last_updatecheck_update
-        if self.api.connected() and delta.total_seconds() > 60 * 60 * 12:
+        if (
+            self.api.connected()
+            and self._updatecheck_supported
+            and delta.total_seconds() > 60 * 60 * 12
+        ):
             await self.hass.async_add_executor_job(self.get_updatecheck)
             self.last_updatecheck_update = datetime.now().replace(microsecond=0)
 
@@ -270,9 +275,26 @@ class TrueNASCoordinator(DataUpdateCoordinator[None]):
     #   get_updatecheck
     # ---------------------------
     def get_updatecheck(self) -> None:
+        source = self.api.query("update.check_available")
+        if isinstance(source, dict) and "error" in source:
+            error_code = source["error"].get("code")
+            error_msg = source["error"].get("message", "")
+            error_reason = ""
+            if "data" in source["error"] and isinstance(source["error"]["data"], dict):
+                error_reason = source["error"]["data"].get("reason", "")
+
+            if error_code == -32601 or error_msg == "Method not found" or "Method does not exist" in error_reason:
+                _LOGGER.info(
+                    "TrueNAS %s update check disabled (method not supported by NAS: %s)",
+                    self.host,
+                    error_reason or error_msg,
+                )
+                self._updatecheck_supported = False
+                return
+
         self.ds["system_info"] = parse_api(
             data=self.ds["system_info"],
-            source=self.api.query("update.check_available"),
+            source=source,
             vals=[
                 {
                     "name": "update_status",

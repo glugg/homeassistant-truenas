@@ -195,7 +195,22 @@ class TrueNASAPI(object):
                         self._error = "malformed_result"
 
                     if (type(data) is list or type(data) is dict) and "error" in data:
-                        if (
+                        error_code = data["error"].get("code")
+                        error_msg = data["error"].get("message", "")
+                        error_reason = ""
+                        if "data" in data["error"] and isinstance(data["error"]["data"], dict):
+                            error_reason = data["error"]["data"].get("reason", "")
+
+                        log_msg = error_reason or error_msg
+
+                        if error_code == -32601 or error_msg == "Method not found" or "Method does not exist" in error_reason:
+                            _LOGGER.warning(
+                                "TrueNAS %s query (%s) not supported: %s",
+                                self._host,
+                                service,
+                                log_msg,
+                            )
+                        elif (
                             "data" in data["error"]
                             and "reason" in data["error"]["data"]
                         ):
